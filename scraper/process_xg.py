@@ -40,7 +40,7 @@ ASA_TO_FD = {
     "New York Red Bulls":         "New York Red Bulls",
     "Orlando City SC":            "Orlando City",
     "Philadelphia Union":         "Philadelphia Union",
-    "Portland Timbers":           "Portland Timbers",
+    "Portland Timbers FC":        "Portland Timbers",
     "Real Salt Lake":             "Real Salt Lake",
     "San Jose Earthquakes":       "San Jose Earthquakes",
     "Seattle Sounders FC":        "Seattle Sounders",
