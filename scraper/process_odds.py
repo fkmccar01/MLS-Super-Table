@@ -8,6 +8,7 @@ Writes : data/processed/matches_odds.csv
 
 Processes seasons 2022-2026.  Uses AvgC (average closing) odds columns.
 vPTS = expected points derived from normalised implied probabilities.
+Regular season only — each team capped at 34 matches.
 """
 
 import os
@@ -20,6 +21,7 @@ MATCHES_OUT     = "data/processed/matches_odds.csv"
 STANDINGS_OUT   = "data/processed/standings_odds.csv"
 SEASONS         = [2022, 2023, 2024, 2025, 2026]
 ODDS_COLS       = ("AvgCH", "AvgCD", "AvgCA")   # home / draw / away
+MAX_GP          = 34  # MLS regular season = 34 matches per team
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -55,7 +57,7 @@ def run():
 
     # ── Parse completed matches with valid odds ───────────────────────
     oh_col, od_col, oa_col = ODDS_COLS
-         
+
     # Force odds columns to numeric (some rows have blanks/text)
     for col in [oh_col, od_col, oa_col]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -128,7 +130,7 @@ def run():
             "Home": "team", "Away": "opponent",
             "HG": "GF", "AG": "GA",
             "Home_PTS": "PTS", "Home_vPTS": "vPTS",
-        })[["Season", "team", "GF", "GA", "PTS", "vPTS", "Res"]]
+        })[["Season", "Date", "team", "GF", "GA", "PTS", "vPTS", "Res"]]
         home = home.copy()
         home["W"] = (home["Res"] == "H").astype(int)
         home["D"] = (home["Res"] == "D").astype(int)
@@ -139,13 +141,18 @@ def run():
             "Away": "team", "Home": "opponent",
             "AG": "GF", "HG": "GA",
             "Away_PTS": "PTS", "Away_vPTS": "vPTS",
-        })[["Season", "team", "GF", "GA", "PTS", "vPTS", "Res"]]
+        })[["Season", "Date", "team", "GF", "GA", "PTS", "vPTS", "Res"]]
         away = away.copy()
         away["W"] = (away["Res"] == "A").astype(int)
         away["D"] = (away["Res"] == "D").astype(int)
         away["L"] = (away["Res"] == "H").astype(int)
 
         combined = pd.concat([home, away], ignore_index=True)
+
+        # Sort by date and keep only first 34 matches per team (regular season)
+        combined["Date"] = pd.to_datetime(combined["Date"], dayfirst=True)
+        combined = combined.sort_values(["team", "Date"])
+        combined = combined.groupby("team").head(MAX_GP)
 
         standings = (
             combined.groupby(["Season", "team"])
@@ -182,7 +189,7 @@ def run():
         all_standings.append(standings)
 
         # Print summary
-        print(f"── {season} Season ({len(standings)} teams, {len(sm)} matches) ──")
+        print(f"── {season} Season ({len(standings)} teams, {combined.shape[0]} team-matches) ──")
         print(standings.to_string(index=False))
         print()
 
