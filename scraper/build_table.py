@@ -48,7 +48,7 @@ def run():
 
     # ── Sort and save ─────────────────────────────────────────────────
     merged = merged.sort_values(
-        ["Season", "PTS", "GD", "GF"],
+        ["Season", "PTS", "W", "GD"],
         ascending=[True, False, False, False],
     ).reset_index(drop=True)
 
