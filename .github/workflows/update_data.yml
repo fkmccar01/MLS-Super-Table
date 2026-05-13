@@ -34,7 +34,7 @@ jobs:
       # ─── DOWNLOAD FRESH CSV ─────────────────────────────────────
       - name: Download latest USA.csv from football-data.co.uk
         run: |
-          mkdir -p data/raw
+          mkdir -p data/raw data/processed || true
           curl -sL -o data/raw/USA.csv https://www.football-data.co.uk/new/USA.csv
           echo "✅ Downloaded USA.csv ($(wc -l < data/raw/USA.csv) lines)"
 
