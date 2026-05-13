@@ -168,9 +168,9 @@ def run():
         standings["PPG"]       = (standings["PTS"] / standings["GP"]).round(2)
         standings["vPPG"]      = (standings["vPTS"] / standings["GP"]).round(2)
 
-        # Sort by PTS desc, then GD, then GF
+        # Sort by PTS desc, then W, then GD
         standings = standings.sort_values(
-            ["PTS", "GD", "GF"], ascending=[False, False, False]
+            ["PTS", "W", "GD"], ascending=[False, False, False]
         ).reset_index(drop=True)
 
         # Reorder columns
