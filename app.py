@@ -39,11 +39,10 @@ season_df = df[df["Season"] == selected_season].copy()
 season_df = season_df.sort_values(
     ["PTS", "W", "GD"], ascending=[False, False, False]
 ).reset_index(drop=True)
-season_df.insert(0, "#", range(1, len(season_df) + 1))
 
 # ── Display columns ──────────────────────────────────────────────────
 display_cols = [
-    "#", "team", "GP", "W", "D", "L", "GF", "GA", "GD",
+    "team", "GP", "W", "D", "L", "GF", "GA", "GD",
     "PTS", "PPG",
     "vPTS", "vPPG", "vPTS_diff",
     "xGF", "xGA", "xGD", "xPTS", "xPPG",
@@ -76,7 +75,6 @@ st.dataframe(
     height=35 * num_teams + 50,
     hide_index=True,
     column_config={
-        "#": st.column_config.NumberColumn("#", format="%d", width="small"),
         "Team": st.column_config.TextColumn("Team", width="medium"),
         "PTS": st.column_config.NumberColumn("PTS", format="%d"),
         "vPTS": st.column_config.NumberColumn("vPTS", format="%.1f"),
