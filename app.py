@@ -45,10 +45,10 @@ display_cols = [
     "team", "GP", "W", "D", "L", "GF", "GA", "GD",
     "PTS", "PPG",
     "vPTS", "vPPG", "vPTS_diff",
-    "xGF", "xGA", "xGD", "xPTS", "xPPG",
+    "xGF", "xGA", "xGD", "xPTS", "xPPG", "xPTS_diff",
 ]
 
-# Only show columns that exist (xG may be missing for some rows)
+# Only show columns that exist
 display_cols = [c for c in display_cols if c in season_df.columns]
 table = season_df[display_cols].copy()
 
@@ -56,6 +56,7 @@ table = season_df[display_cols].copy()
 table = table.rename(columns={
     "team": "Team",
     "vPTS_diff": "PTS−vPTS",
+    "xPTS_diff": "PTS−xPTS",
 })
 
 # ── Summary metrics ───────────────────────────────────────────────────
@@ -83,6 +84,7 @@ st.dataframe(
         "vPPG": st.column_config.NumberColumn("vPPG", format="%.2f"),
         "xPPG": st.column_config.NumberColumn("xPPG", format="%.2f"),
         "PTS−vPTS": st.column_config.NumberColumn("PTS−vPTS", format="%.1f"),
+        "PTS−xPTS": st.column_config.NumberColumn("PTS−xPTS", format="%.1f"),
         "xGF": st.column_config.NumberColumn("xGF", format="%.1f"),
         "xGA": st.column_config.NumberColumn("xGA", format="%.1f"),
         "xGD": st.column_config.NumberColumn("xGD", format="%.1f"),
@@ -103,11 +105,20 @@ with st.expander("ℹ️ Column definitions"):
 | **xGD** | Expected goal difference |
 | **xPTS** | Expected points based on xG model (American Soccer Analysis) |
 | **xPPG** | Expected points per game |
+| **PTS−xPTS** | Overperformance vs. xG expectations (positive = outperformed) |
 """)
 
 # ── Footer ────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption(
-    "Data: football-data.co.uk (odds) · American Soccer Analysis (xG) · "
-    "Updated automatically via GitHub Actions."
-)
+try:
+    with open("data/processed/last_updated.txt") as f:
+        last_updated = f.read().strip()
+    st.caption(
+        f"Data: football-data.co.uk (odds) · American Soccer Analysis (xG) · "
+        f"Updated automatically via GitHub Actions · Last updated: {last_updated}"
+    )
+except FileNotFoundError:
+    st.caption(
+        "Data: football-data.co.uk (odds) · American Soccer Analysis (xG) · "
+        "Updated automatically via GitHub Actions."
+    )
