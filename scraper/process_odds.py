@@ -55,6 +55,10 @@ def run():
 
     # ── Parse completed matches with valid odds ───────────────────────
     oh_col, od_col, oa_col = ODDS_COLS
+         
+    # Force odds columns to numeric (some rows have blanks/text)
+    for col in [oh_col, od_col, oa_col]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Keep only rows that have a result and valid odds
     mask = (
