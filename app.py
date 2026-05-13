@@ -1,89 +1,113 @@
 #!/usr/bin/env python3
 """
-app.py — MLS Super Table Streamlit app.
-Displays MLS standings by season with PTS, vPTS, and xPTS.
+app.py — MLS Super Table: Streamlit frontend.
+
+Displays MLS standings with actual points (PTS), Vegas points (vPTS),
+and expected points (xPTS) side by side.
 """
 
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="MLS Super Table", page_icon="⚽", layout="wide")
+# ── Page config ───────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="MLS Super Table",
+    page_icon="⚽",
+    layout="wide",
+)
 
 # ── Load data ─────────────────────────────────────────────────────────
-@st.cache_data
-def load_data():
+@st.cache_data(ttl=3600)
+def load_standings():
     df = pd.read_csv("data/processed/standings.csv")
     return df
 
-df = load_data()
+df = load_standings()
 
 # ── Header ────────────────────────────────────────────────────────────
 st.title("⚽ MLS Super Table")
-st.markdown("Standings by **Actual Points**, **Vegas Points (vPTS)**, and **Expected Points (xPTS)**")
-
-# ── Season selector ──────────────────────────────────────────────────
-seasons = sorted(df["Season"].unique(), reverse=True)
-
-# Label the current/latest season as "Live"
-season_labels = {}
-for s in seasons:
-    if s == max(seasons):
-        season_labels[f"{s} (Live)"] = s
-    else:
-        season_labels[str(s)] = s
-
-selected_label = st.selectbox("Select Season", list(season_labels.keys()))
-selected_season = season_labels[selected_label]
-
-# ── Filter to selected season ────────────────────────────────────────
-table = df[df["Season"] == selected_season].copy()
-table = table.sort_values(["PTS", "GD", "GF"], ascending=[False, False, False]).reset_index(drop=True)
-table.index += 1  # 1-based rank
-table.index.name = "Rank"
-
-# ── Choose display columns ───────────────────────────────────────────
-base_cols = ["team", "GP", "W", "D", "L", "GF", "GA", "GD", "PTS", "PPG",
-             "vPTS", "vPPG", "vPTS_diff"]
-
-# Only show xG columns if data exists
-has_xg = table["xPTS"].notna().any()
-if has_xg:
-    display_cols = base_cols + ["xGF", "xGA", "xGD", "xPTS", "xPPG"]
-else:
-    display_cols = base_cols
-
-display = table[display_cols].copy()
-
-# Rename for cleaner headers
-display = display.rename(columns={
-    "team": "Team",
-    "vPTS_diff": "PTS ± vPTS",
-})
-
-# ── Sort toggle ──────────────────────────────────────────────────────
-sort_options = ["PTS", "vPTS"]
-if has_xg:
-    sort_options.append("xPTS")
-
-sort_by = st.radio("Sort by", sort_options, horizontal=True)
-
-if sort_by == "vPTS":
-    display = display.sort_values("vPTS", ascending=False).reset_index(drop=True)
-    display.index += 1
-elif sort_by == "xPTS" and has_xg:
-    display = display.sort_values("xPTS", ascending=False).reset_index(drop=True)
-    display.index += 1
-
-# ── Display table ────────────────────────────────────────────────────
-st.dataframe(
-    display,
-    use_container_width=True,
-    height=35 * len(display) + 38,  # auto-size height
+st.markdown(
+    "Comparing actual points (PTS), Vegas implied points (vPTS), "
+    "and expected points from xG (xPTS) across MLS seasons."
 )
 
-# ── Footer ───────────────────────────────────────────────────────────
-st.markdown("---")
+# ── Season selector ───────────────────────────────────────────────────
+seasons = sorted(df["Season"].unique(), reverse=True)
+selected_season = st.selectbox("Select Season", seasons, index=0)
+
+season_df = df[df["Season"] == selected_season].copy()
+season_df = season_df.sort_values(
+    ["PTS", "W", "GD"], ascending=[False, False, False]
+).reset_index(drop=True)
+season_df.index = season_df.index + 1  # 1-based rank
+
+# ── Display columns ──────────────────────────────────────────────────
+display_cols = [
+    "team", "GP", "W", "D", "L", "GF", "GA", "GD",
+    "PTS", "PPG",
+    "vPTS", "vPPG", "vPTS_diff",
+    "xGF", "xGA", "xGD", "xPTS", "xPPG",
+]
+
+# Only show columns that exist (xG may be missing for some rows)
+display_cols = [c for c in display_cols if c in season_df.columns]
+table = season_df[display_cols].copy()
+
+# Rename for display
+table = table.rename(columns={
+    "team": "Team",
+    "vPTS_diff": "PTS−vPTS",
+})
+
+# ── Summary metrics ───────────────────────────────────────────────────
+num_teams = len(table)
+total_matches = season_df["GP"].sum() // 2
+current_label = " 🔴 LIVE" if selected_season == seasons[0] else ""
+
 st.markdown(
-    "**vPTS** = Vegas Points from betting odds ([football-data.co.uk](https://www.football-data.co.uk/usa.php)) · "
-    "**xPTS** = Expected Points from xG data ([FBRef](https://fbref.com/))"
+    f"### {selected_season} Season{current_label}\n"
+    f"**{num_teams}** teams · **{total_matches}** matches"
+)
+
+# ── Styled table ──────────────────────────────────────────────────────
+st.dataframe(
+    table,
+    use_container_width=True,
+    height=35 * num_teams + 50,
+    column_config={
+        "Team": st.column_config.TextColumn("Team", width="medium"),
+        "PTS": st.column_config.NumberColumn("PTS", format="%d"),
+        "vPTS": st.column_config.NumberColumn("vPTS", format="%.1f"),
+        "xPTS": st.column_config.NumberColumn("xPTS", format="%.1f"),
+        "PPG": st.column_config.NumberColumn("PPG", format="%.2f"),
+        "vPPG": st.column_config.NumberColumn("vPPG", format="%.2f"),
+        "xPPG": st.column_config.NumberColumn("xPPG", format="%.2f"),
+        "PTS−vPTS": st.column_config.NumberColumn("PTS−vPTS", format="%.1f"),
+        "xGF": st.column_config.NumberColumn("xGF", format="%.1f"),
+        "xGA": st.column_config.NumberColumn("xGA", format="%.1f"),
+        "xGD": st.column_config.NumberColumn("xGD", format="%.1f"),
+    },
+)
+
+# ── Legend ─────────────────────────────────────────────────────────────
+with st.expander("ℹ️ Column definitions"):
+    st.markdown("""
+| Column | Definition |
+|--------|-----------|
+| **PTS** | Actual MLS points (3W + 1D) |
+| **PPG** | Points per game |
+| **vPTS** | Vegas Points — expected points derived from closing betting odds (football-data.co.uk) |
+| **vPPG** | Vegas points per game |
+| **PTS−vPTS** | Overperformance vs. Vegas expectations (positive = outperformed) |
+| **xGF / xGA** | Expected goals for / against (American Soccer Analysis) |
+| **xGD** | Expected goal difference |
+| **xPTS** | Expected points based on xG model (American Soccer Analysis) |
+| **xPPG** | Expected points per game |
+""")
+
+# ── Footer ────────────────────────────────────────────────────────────
+st.markdown("---")
+st.caption(
+    "Data: football-data.co.uk (odds) · American Soccer Analysis (xG) · "
+    "Updated automatically via GitHub Actions."
 )
