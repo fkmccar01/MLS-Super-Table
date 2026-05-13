@@ -3,11 +3,10 @@
 process_xg.py — MLS Super Table: Expected Points (xPTS) from xG data.
 
 Reads  : American Soccer Analysis API (itscalledsoccer)
-Writes : data/processed/matches_xg.csv
-         data/processed/standings_xg.csv
+Writes : data/processed/standings_xg.csv
 
 Processes seasons 2022-2026.
-xPTS = expected points derived from match-level xG using Poisson model.
+xPTS = expected points derived from team-level xG using Poisson model.
 """
 
 import os
@@ -17,13 +16,11 @@ from scipy.stats import poisson
 from itscalledsoccer.client import AmericanSoccerAnalysis
 
 # ── Config ────────────────────────────────────────────────────────────
-MATCHES_OUT   = "data/processed/matches_xg.csv"
 STANDINGS_OUT = "data/processed/standings_xg.csv"
 SEASONS       = [2022, 2023, 2024, 2025, 2026]
 MAX_GOALS     = 10  # max goals to consider in Poisson grid
 
 # ── Team name mapping: ASA → football-data.co.uk ─────────────────────
-# Ensures team names match between odds and xG standings.
 ASA_TO_FD = {
     "Atlanta United FC":          "Atlanta Utd",
     "Austin FC":                  "Austin FC",
@@ -59,33 +56,22 @@ ASA_TO_FD = {
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
-def poisson_xpts(xg_home, xg_away):
+def poisson_xpts_per_game(avg_xgf, avg_xga):
     """
-    Given match xG for home and away, use a Poisson model to compute
-    expected points for each team.
-    Returns (home_xpts, away_xpts).
+    Given average xGF and xGA per game, use Poisson to compute
+    expected points per game.
     """
-    # Build Poisson probability grids
-    home_goals = np.arange(0, MAX_GOALS + 1)
-    away_goals = np.arange(0, MAX_GOALS + 1)
+    goals = np.arange(0, MAX_GOALS + 1)
 
-    home_probs = poisson.pmf(home_goals, xg_home)
-    away_probs = poisson.pmf(away_goals, xg_away)
+    for_probs = poisson.pmf(goals, avg_xgf)
+    against_probs = poisson.pmf(goals, avg_xga)
 
-    # Joint probability matrix
-    prob_matrix = np.outer(home_probs, away_probs)
+    prob_matrix = np.outer(for_probs, against_probs)
 
-    # P(home win) = sum of probs where home > away
-    p_home_win = np.sum(np.tril(prob_matrix, -1))
-    # P(draw) = sum of diagonal
+    p_win  = np.sum(np.tril(prob_matrix, -1))
     p_draw = np.sum(np.diag(prob_matrix))
-    # P(away win) = sum of probs where away > home
-    p_away_win = np.sum(np.triu(prob_matrix, 1))
 
-    home_xpts = round(3 * p_home_win + 1 * p_draw, 4)
-    away_xpts = round(3 * p_away_win + 1 * p_draw, 4)
-
-    return home_xpts, away_xpts
+    return round(3 * p_win + 1 * p_draw, 4)
 
 
 def map_team_name(asa_name):
@@ -99,105 +85,75 @@ def run():
 
     asa = AmericanSoccerAnalysis()
 
-    all_matches = []
     all_standings = []
 
     for season in SEASONS:
         print(f"\n🌐 Fetching xG data for {season} season...")
 
         try:
-            games = asa.get_games_xgoals(
+            team_xg = asa.get_team_xgoals(
                 leagues="mls",
                 season_name=str(season),
+                split_by_seasons=True,
             )
         except Exception as e:
             print(f"⚠️  Failed to fetch {season}: {e}")
             continue
 
-        if games.empty:
-            print(f"⚠️  No games found for {season}, skipping.")
+        if team_xg.empty:
+            print(f"⚠️  No data found for {season}, skipping.")
             continue
 
-        # Filter to completed games with valid xG
-        games = games.dropna(subset=["home_xgoals", "away_xgoals"])
-        games = games[games["home_xgoals"] > 0]  # drop 0-0 xG edge cases
-        print(f"   Found {len(games)} completed matches with xG data")
+        # Debug: print columns on first season so we know what ASA returns
+        if season == SEASONS[0]:
+            print(f"   ASA columns: {list(team_xg.columns)}")
 
-        # ── Match-level xPTS ──────────────────────────────────────────
+        print(f"   Found {len(team_xg)} teams with xG data")
+
+        # Build standings from team aggregates
         records = []
-        for _, g in games.iterrows():
-            home = map_team_name(g.get("home_team_name", g.get("home_team_id", "")))
-            away = map_team_name(g.get("away_team_name", g.get("away_team_id", "")))
-            xg_h = float(g["home_xgoals"])
-            xg_a = float(g["away_xgoals"])
+        for _, row in team_xg.iterrows():
+            # Handle different possible column names across versions
+            team_name = map_team_name(str(
+                row.get("team_name", row.get("team_id", "Unknown"))
+            ))
 
-            # Clamp xG to avoid Poisson issues with 0
-            xg_h = max(xg_h, 0.05)
-            xg_a = max(xg_a, 0.05)
+            gp  = int(row.get("count", row.get("games_played", 0)))
+            xgf = float(row.get("xgoals_for", row.get("team_xgoals", 0)))
+            xga = float(row.get("xgoals_against", row.get("opponent_xgoals", 0)))
 
-            home_xpts, away_xpts = poisson_xpts(xg_h, xg_a)
+            if gp == 0:
+                continue
+
+            # Poisson xPTS from per-game averages
+            avg_xgf = max(xgf / gp, 0.05)
+            avg_xga = max(xga / gp, 0.05)
+            xpts_per_game = poisson_xpts_per_game(avg_xgf, avg_xga)
+            xpts = round(xpts_per_game * gp, 1)
 
             records.append({
-                "Season":     season,
-                "Date":       g.get("date_time_utc", ""),
-                "Home":       home,
-                "Away":       away,
-                "Home_xG":    round(xg_h, 2),
-                "Away_xG":    round(xg_a, 2),
-                "Home_xPTS":  home_xpts,
-                "Away_xPTS":  away_xpts,
+                "Season": season,
+                "team":   team_name,
+                "GP":     gp,
+                "xGF":    round(xgf, 1),
+                "xGA":    round(xga, 1),
+                "xGD":    round(xgf - xga, 1),
+                "xPTS":   xpts,
+                "xPPG":   round(xpts / gp, 2),
             })
 
-        matches_df = pd.DataFrame(records)
-        all_matches.append(matches_df)
-
-        # ── Build standings ───────────────────────────────────────────
-        home_rows = matches_df[["Season", "Home", "Home_xG", "Away_xG", "Home_xPTS"]].copy()
-        home_rows.columns = ["Season", "team", "xGF", "xGA", "xPTS"]
-
-        away_rows = matches_df[["Season", "Away", "Away_xG", "Home_xG", "Away_xPTS"]].copy()
-        away_rows.columns = ["Season", "team", "xGF", "xGA", "xPTS"]
-
-        combined = pd.concat([home_rows, away_rows], ignore_index=True)
-
-        standings = (
-            combined.groupby(["Season", "team"])
-            .agg(
-                GP   = ("xPTS", "count"),
-                xGF  = ("xGF",  "sum"),
-                xGA  = ("xGA",  "sum"),
-                xPTS = ("xPTS", "sum"),
-            )
-            .reset_index()
-        )
-
-        standings["xGF"]  = standings["xGF"].round(1)
-        standings["xGA"]  = standings["xGA"].round(1)
-        standings["xGD"]  = (standings["xGF"] - standings["xGA"]).round(1)
-        standings["xPTS"] = standings["xPTS"].round(1)
-        standings["xPPG"] = (standings["xPTS"] / standings["GP"]).round(2)
-
+        standings = pd.DataFrame(records)
         standings = standings.sort_values("xPTS", ascending=False).reset_index(drop=True)
-
-        standings = standings[
-            ["Season", "team", "GP", "xGF", "xGA", "xGD", "xPTS", "xPPG"]
-        ]
-
         all_standings.append(standings)
 
         print(f"📊 {season}: {len(standings)} teams")
         print(standings.to_string(index=False))
 
-    # ── Save ──────────────────────────────────────────────────────────
-    if all_matches:
-        final_matches = pd.concat(all_matches, ignore_index=True)
-        final_matches.to_csv(MATCHES_OUT, index=False)
-        print(f"\n💾 Saved {len(final_matches)} matches → {MATCHES_OUT}")
-
+    # Save
     if all_standings:
-        final_standings = pd.concat(all_standings, ignore_index=True)
-        final_standings.to_csv(STANDINGS_OUT, index=False)
-        print(f"📊 Saved standings ({len(final_standings)} rows) → {STANDINGS_OUT}")
+        final = pd.concat(all_standings, ignore_index=True)
+        final.to_csv(STANDINGS_OUT, index=False)
+        print(f"\n📊 Saved standings ({len(final)} rows) → {STANDINGS_OUT}")
     else:
         print("❌ No standings generated.")
 
