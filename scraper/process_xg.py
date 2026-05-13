@@ -6,19 +6,16 @@ Reads  : American Soccer Analysis API (itscalledsoccer)
 Writes : data/processed/standings_xg.csv
 
 Processes seasons 2022-2026.
-xPTS = expected points derived from team-level xG using Poisson model.
+Uses ASA's xpoints directly (no Poisson calculation needed).
 """
 
 import os
-import numpy as np
 import pandas as pd
-from scipy.stats import poisson
 from itscalledsoccer.client import AmericanSoccerAnalysis
 
 # ── Config ────────────────────────────────────────────────────────────
 STANDINGS_OUT = "data/processed/standings_xg.csv"
 SEASONS       = [2022, 2023, 2024, 2025, 2026]
-MAX_GOALS     = 10  # max goals to consider in Poisson grid
 
 # ── Team name mapping: ASA → football-data.co.uk ─────────────────────
 ASA_TO_FD = {
@@ -56,24 +53,6 @@ ASA_TO_FD = {
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
-def poisson_xpts_per_game(avg_xgf, avg_xga):
-    """
-    Given average xGF and xGA per game, use Poisson to compute
-    expected points per game.
-    """
-    goals = np.arange(0, MAX_GOALS + 1)
-
-    for_probs = poisson.pmf(goals, avg_xgf)
-    against_probs = poisson.pmf(goals, avg_xga)
-
-    prob_matrix = np.outer(for_probs, against_probs)
-
-    p_win  = np.sum(np.tril(prob_matrix, -1))
-    p_draw = np.sum(np.diag(prob_matrix))
-
-    return round(3 * p_win + 1 * p_draw, 4)
-
-
 def map_team_name(asa_name):
     """Map ASA team name to football-data.co.uk name."""
     return ASA_TO_FD.get(asa_name, asa_name)
@@ -84,6 +63,16 @@ def run():
     os.makedirs("data/processed", exist_ok=True)
 
     asa = AmericanSoccerAnalysis()
+
+    # Build team_id → team_name lookup
+    print("🌐 Loading ASA team directory...")
+    try:
+        teams = asa.get_teams(leagues="mls")
+        team_lookup = dict(zip(teams["team_id"], teams["team_name"]))
+        print(f"   Loaded {len(team_lookup)} teams")
+    except Exception as e:
+        print(f"⚠️  Could not load team directory: {e}")
+        team_lookup = {}
 
     all_standings = []
 
@@ -104,7 +93,7 @@ def run():
             print(f"⚠️  No data found for {season}, skipping.")
             continue
 
-        # Debug: print columns on first season so we know what ASA returns
+        # Debug: print columns on first season
         if season == SEASONS[0]:
             print(f"   ASA columns: {list(team_xg.columns)}")
 
@@ -113,23 +102,18 @@ def run():
         # Build standings from team aggregates
         records = []
         for _, row in team_xg.iterrows():
-            # Handle different possible column names across versions
-            team_name = map_team_name(str(
-                row.get("team_name", row.get("team_id", "Unknown"))
-            ))
+            # Resolve team name: lookup table first, then fallback to team_id
+            raw_id = str(row["team_id"])
+            team_name_asa = team_lookup.get(raw_id, raw_id)
+            team_name = map_team_name(team_name_asa)
 
-            gp  = int(row.get("count", row.get("games_played", 0)))
-            xgf = float(row.get("xgoals_for", row.get("team_xgoals", 0)))
-            xga = float(row.get("xgoals_against", row.get("opponent_xgoals", 0)))
+            gp   = int(row["count_games"])
+            xgf  = float(row["xgoals_for"])
+            xga  = float(row["xgoals_against"])
+            xpts = round(float(row["xpoints"]), 1)
 
             if gp == 0:
                 continue
-
-            # Poisson xPTS from per-game averages
-            avg_xgf = max(xgf / gp, 0.05)
-            avg_xga = max(xga / gp, 0.05)
-            xpts_per_game = poisson_xpts_per_game(avg_xgf, avg_xga)
-            xpts = round(xpts_per_game * gp, 1)
 
             records.append({
                 "Season": season,
