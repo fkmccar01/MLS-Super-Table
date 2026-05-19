@@ -17,7 +17,6 @@ st.set_page_config(
 )
 
 # ── Load data ─────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
 def load_standings():
     df = pd.read_csv("data/processed/standings.csv")
     return df
